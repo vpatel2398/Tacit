@@ -1,4 +1,4 @@
-# Knowledge Layer
+# Tacit
 
 An always-on institutional knowledge capture system — built so companies stop losing what their people know when those people go quiet, change roles, or leave.
 
