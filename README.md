@@ -2,7 +2,7 @@
 
 **An always-on system that captures what senior employees know before they leave.**
 
-🔗 **[Live demo](https://tacit.vercel.app)** — click "Enter demo workspace", no signup needed
+🔗 **[Live demo](https://tacit-three.vercel.app/)** — click "Enter demo workspace", no signup needed
 `demo@knowledgelayer.app` / `demo1234`
 
 ---
