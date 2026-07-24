@@ -1,65 +1,145 @@
 # Tacit
 
-An always-on institutional knowledge capture system — built so companies stop losing what their people know when those people go quiet, change roles, or leave.
+**An always-on system that captures what senior employees know before they leave.**
+
+🔗 **[Live demo](https://tacit.vercel.app)** — click "Enter demo workspace", no signup needed
+`demo@knowledgelayer.app` / `demo1234`
+
+---
+
+## The problem
+
+When a 30-year engineer retires, the documented knowledge leaves with the file
+share. The *undocumented* knowledge — why they never trust a particular supplier,
+which machine needs a specific restart sequence, who to call when a process
+breaks — leaves with them entirely.
+
+Most knowledge-management tools ask people to write things down. They don't,
+because the knowledge is tacit: they don't know they know it until someone asks
+the right question.
+
+Tacit asks the questions.
+
+---
 
 ## What it does
 
-Knowledge Layer runs in the background of a team's workflow, capturing institutional knowledge before it walks out the door:
+**Capture.** An AI interviewer questions a senior employee using their role,
+domains, and the company's own documents as context. Every answer is
+automatically parsed into discrete, typed knowledge — decisions, warnings,
+failure patterns, heuristics, tribal rules — each stored with the original quote
+as a citation.
 
-- **AI interview agent** — conversational agent that draws out tacit knowledge from subject-matter experts and extracts it into structured, typed chunks
-- **Q&A with citations** — ask questions against the captured knowledge base and get answers grounded in sourced, traceable chunks
-- **Human routing** — when the knowledge base can't answer confidently, questions get routed to the right person instead of dead-ending
-- **Gap detection** — surfaces areas where institutional knowledge is thin or missing, so teams know where to focus capture efforts
-- **Knowledge holder profiles** — track who knows what across the org
-- **Team & company dashboards** — sessions, knowledge base browsing, team management, and settings in one place
+**Retrieve.** Anyone can ask a question in plain language. The system searches
+captured knowledge semantically and answers with citations, or admits it doesn't
+know and routes the question to the right person.
 
-## Stack
+**Self-heal.** When a human answers a routed question, that answer runs through
+the same extraction pipeline and becomes permanent knowledge. Ask again and the
+system answers it. Every human answer permanently reduces future interruptions.
 
-- **Framework:** Next.js 16 (App Router)
-- **Database / Vector store:** Supabase (Postgres + pgvector)
-- **Embeddings:** local embedding model
-- **LLM:** Groq (development) — production split across Claude Haiku / Sonnet depending on task complexity
-- **Auth:** Supabase Auth
+**Detect gaps.** The system compares what's been captured against the person's
+role and the company's documentation, then flags what's missing — with severity
+and a suggested interview question to close it.
 
-## Getting started
+---
 
-1. Clone the repo
+## Architecture
 
-   ```bash
-   git clone https://github.com/<your-username>/<repo-name>.git
-   cd <repo-name>
-   ```
+```
+Upload document ──> parse ──> chunk (overlapping) ──> embed ──> pgvector
+                                                                   │
+Interview ──> LLM asks question ◄──── vector search for context ───┘
+      │
+      └──> answer ──> LLM extracts typed chunks ──> embed ──> pgvector
+                                                                   │
+Question ──> embed ──> vector search ─────────────────────────────┘
+      │
+      ├── confidence ≥ 0.6 ──> answer with citations
+      └── confidence < 0.6 ──> route to human ──> extract ──> back into the KB
+```
 
-2. Install dependencies
+**Stack**
 
-   ```bash
-   npm install
-   ```
+| Layer | Choice |
+|---|---|
+| App | Next.js 16 (App Router, Server Components) |
+| Database | Supabase — Postgres + pgvector + Auth + Storage |
+| Embeddings | Cloudflare Workers AI — `bge-small-en-v1.5`, 384-dim |
+| LLM | Groq (`gpt-oss-120b`) |
+| Hosting | Vercel |
 
-3. Set up environment variables — copy `.env.example` to `.env.local` and fill in:
+---
 
-   ```env
-   NEXT_PUBLIC_SUPABASE_URL=[your Supabase project URL]
-   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=[your Supabase anon/publishable key]
-   GROQ_API_KEY=[your Groq API key]
-   ```
+## Engineering notes
 
-4. Run the dev server
+**The RAG pipeline is built from scratch** — no LangChain, no vector-DB SaaS.
+Chunking with configurable overlap, embedding, `ivfflat` indexes, and cosine
+similarity search as Postgres functions. Retrieval is a SQL call, not a
+framework abstraction.
 
-   ```bash
-   npm run dev
-   ```
+**Multi-tenancy runs on row-level security.** Every table is scoped by company at
+the database layer, so a query that forgets a `WHERE` clause still can't leak
+across tenants. Company creation needed a specific RLS policy split, because the
+insert-and-return pattern reads the row back before the user is a member of it.
 
-   The app runs on [localhost:3000](http://localhost:3000).
+**The AI layer is provider-swappable by design.** Every LLM call goes through a
+single `chat()` function in `lib/ai/llm.ts`. Moving from Groq to Claude or OpenAI
+is one file. Same for embeddings — one module, one interface. This mattered in
+practice: the embedding provider changed mid-build when Hugging Face moved Docker
+Spaces behind a paywall, and the swap touched exactly one file.
 
-## Project status
+**Hallucination is treated as the primary failure mode.** The Q&A prompt is
+constrained to the retrieved chunks and instructed that admitting ignorance is
+better than guessing. Answers below a confidence threshold route to a human
+rather than being served. For a tool aimed at manufacturing and pharma, a
+confident wrong answer is worse than no answer.
 
-- ✅ Phase 1 — schema, auth, onboarding, knowledge holder profiles, document ingestion pipeline
-- ✅ Phase 2 — AI interview agent + knowledge extraction into typed chunks
-- ✅ Phase 3 — Q&A layer with citations and human routing
-- ✅ Gap detection, knowledge base, sessions, team, and settings pages
-- ⏳ Team layer (hybrid team-only + company-wide knowledge, multi-team membership, admin/lead roles) — deferred to Phase 1.5
+**Built entirely on free tiers**, with a documented production path — the
+cost analysis for embeddings and LLM routing (cheap model for high-volume
+extraction, stronger model for reasoning) is in `EMBEDDINGS_GUIDE.md` and
+`LLM_GUIDE.md`.
 
-## License
+---
 
-Private project — not currently licensed for reuse.
+## Running locally
+
+```bash
+git clone https://github.com/vpatel2398/Tacit.git
+cd Tacit
+npm install
+cp .env.example .env.local   # fill in your keys
+npm run dev
+```
+
+Then run the migrations in `supabase/migrations/` in order via the Supabase SQL
+editor, and seed demo data:
+
+```bash
+node scripts/seed-demo.mjs
+```
+
+**Required keys** — all free tier:
+
+| Variable | Source |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` | supabase.com |
+| `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` | dash.cloudflare.com — Workers AI |
+| `GROQ_API_KEY` | console.groq.com |
+| `SUPABASE_SERVICE_ROLE_KEY` | local only, for the seed script |
+
+---
+
+## Status
+
+Working end to end: authentication, multi-tenant company onboarding with invite
+codes and approval flow, document ingestion (PDF / DOCX / TXT / MD / CSV), the AI
+interview and extraction engine, semantic Q&A with human routing, and gap
+detection.
+
+Deliberately deferred: team-level knowledge scoping, and passive capture from
+Slack and meeting transcripts — both reuse the existing extraction engine.
+
+---
+
+Built by [Vivek Patel](https://github.com/vpatel2398).
